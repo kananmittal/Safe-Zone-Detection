@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+requests
+pydub
+jinja2
+python-multipart
+openai-whisper
