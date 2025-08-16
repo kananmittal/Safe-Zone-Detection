@@ -5,3 +5,5 @@ pydub
 jinja2
 python-multipart
 openai-whisper
+librosa
+numpy

@@ -5,6 +5,8 @@ import os
 import subprocess
 from pydub import AudioSegment
 import tempfile
+import numpy as np
+import librosa
 
 app = FastAPI()
 
@@ -16,6 +18,126 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def analyze_voice_emotion(audio_path):
+    """Analyze voice characteristics to detect emotional tone"""
+    try:
+        # Load audio file
+        y, sr = librosa.load(audio_path, sr=None)
+        
+        # Extract audio features
+        features = {}
+        
+        # 1. Pitch analysis (fundamental frequency)
+        pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+        pitch_values = pitches[magnitudes > 0.1]
+        if len(pitch_values) > 0:
+            features['pitch_mean'] = np.mean(pitch_values)
+            features['pitch_std'] = np.std(pitch_values)
+            features['pitch_range'] = np.max(pitch_values) - np.min(pitch_values)
+        else:
+            features['pitch_mean'] = 0
+            features['pitch_std'] = 0
+            features['pitch_range'] = 0
+        
+        # 2. Volume/Energy analysis
+        rms = librosa.feature.rms(y=y)[0]
+        features['volume_mean'] = np.mean(rms)
+        features['volume_std'] = np.std(rms)
+        features['volume_max'] = np.max(rms)
+        
+        # 3. Speech rate (tempo)
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        features['speech_rate'] = tempo
+        
+        # 4. Spectral features
+        spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+        features['spectral_mean'] = np.mean(spectral_centroids)
+        features['spectral_std'] = np.std(spectral_centroids)
+        
+        # 5. Zero crossing rate (indicates voice quality)
+        zcr = librosa.feature.zero_crossing_rate(y)[0]
+        features['zcr_mean'] = np.mean(zcr)
+        
+        # Analyze emotions based on features
+        emotion = analyze_emotion_from_features(features)
+        
+        return {
+            'emotion': emotion,
+            'confidence': calculate_confidence(features),
+            'features': features
+        }
+        
+    except Exception as e:
+        return {
+            'emotion': 'unknown',
+            'confidence': 0.0,
+            'error': str(e)
+        }
+
+def analyze_emotion_from_features(features):
+    """Analyze emotion based on audio features"""
+    emotion_scores = {
+        'fear': 0,
+        'anger': 0,
+        'sadness': 0,
+        'happiness': 0,
+        'neutral': 0
+    }
+    
+    # Fear indicators
+    if features['pitch_std'] > 50:  # High pitch variation
+        emotion_scores['fear'] += 2
+    if features['volume_std'] > 0.1:  # Volume variation
+        emotion_scores['fear'] += 1
+    if features['speech_rate'] > 120:  # Fast speech
+        emotion_scores['fear'] += 1
+    if features['pitch_mean'] > 200:  # High pitch
+        emotion_scores['fear'] += 1
+    
+    # Anger indicators
+    if features['volume_mean'] > 0.15:  # Loud voice
+        emotion_scores['anger'] += 2
+    if features['pitch_mean'] > 180:  # High pitch
+        emotion_scores['anger'] += 1
+    if features['speech_rate'] > 110:  # Fast speech
+        emotion_scores['anger'] += 1
+    
+    # Sadness indicators
+    if features['pitch_mean'] < 120:  # Low pitch
+        emotion_scores['sadness'] += 2
+    if features['volume_mean'] < 0.05:  # Quiet voice
+        emotion_scores['sadness'] += 1
+    if features['speech_rate'] < 80:  # Slow speech
+        emotion_scores['sadness'] += 1
+    
+    # Happiness indicators
+    if 120 < features['pitch_mean'] < 180:  # Moderate pitch
+        emotion_scores['happiness'] += 1
+    if 0.05 < features['volume_mean'] < 0.15:  # Moderate volume
+        emotion_scores['happiness'] += 1
+    if 80 < features['speech_rate'] < 110:  # Moderate speech rate
+        emotion_scores['happiness'] += 1
+    
+    # Neutral (baseline)
+    emotion_scores['neutral'] = 1
+    
+    # Return the emotion with highest score
+    return max(emotion_scores, key=emotion_scores.get)
+
+def calculate_confidence(features):
+    """Calculate confidence in emotion detection"""
+    # Simple confidence based on feature quality
+    confidence = 0.5  # Base confidence
+    
+    if features['pitch_std'] > 0:
+        confidence += 0.2
+    if features['volume_std'] > 0:
+        confidence += 0.2
+    if features['speech_rate'] > 0:
+        confidence += 0.1
+    
+    return min(confidence, 1.0)
 
 def simple_speech_to_text(audio_path):
     """Simple speech-to-text using available tools"""
@@ -133,13 +255,25 @@ async def home():
                 font-size: 12px;
                 color: #666;
             }
+            .emotion-badge {
+                display: inline-block;
+                padding: 5px 15px;
+                border-radius: 15px;
+                font-weight: bold;
+                margin: 5px;
+            }
+            .emotion-fear { background: #ff9800; color: white; }
+            .emotion-anger { background: #f44336; color: white; }
+            .emotion-sadness { background: #2196f3; color: white; }
+            .emotion-happiness { background: #4caf50; color: white; }
+            .emotion-neutral { background: #9e9e9e; color: white; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <h1>🎤 Voice Distress Detection</h1>
-                <p>Upload an audio file to detect distress in speech</p>
+                <p>Upload an audio file to detect distress in speech and emotional tone</p>
             </div>
             
             <div class="upload-area">
@@ -230,11 +364,17 @@ async def home():
                         log('Data received: ' + JSON.stringify(data));
                         const isDistress = data.distress;
                         resultDiv.className = 'result ' + (isDistress ? 'distress' : 'safe');
+                        
+                        // Create emotion badge
+                        const emotionBadge = data.voice_emotion ? 
+                            `<span class="emotion-badge emotion-${data.voice_emotion.emotion}">${data.voice_emotion.emotion.toUpperCase()}</span>` : '';
+                        
                         resultDiv.innerHTML = `
                             <h3>📊 Analysis Results</h3>
                             <p><strong>Transcript:</strong> ${data.transcript || 'No transcript available'}</p>
-                            <p><strong>Status:</strong> ${isDistress ? '🚨 DISTRESS DETECTED' : '✅ SAFE'}</p>
-                            <p><strong>Analysis:</strong> ${data.label || 'No analysis available'}</p>
+                            <p><strong>Content Analysis:</strong> ${isDistress ? '🚨 DISTRESS DETECTED' : '✅ SAFE'}</p>
+                            <p><strong>Voice Emotion:</strong> ${emotionBadge} (Confidence: ${data.voice_emotion ? Math.round(data.voice_emotion.confidence * 100) : 0}%)</p>
+                            <p><strong>Overall Assessment:</strong> ${data.label || 'No analysis available'}</p>
                         `;
                     })
                     .catch(error => {
@@ -267,9 +407,25 @@ async def voice_check(file: UploadFile = File(...)):
         # Convert speech to text
         transcript = simple_speech_to_text(temp_path)
         
-        # Detect distress
-        label = detect_distress_simple(transcript)
-        distress = label.lower().startswith("distress")
+        # Analyze voice emotion
+        voice_emotion = analyze_voice_emotion(temp_path)
+        
+        # Detect distress from text content
+        text_distress = detect_distress_simple(transcript)
+        
+        # Combine text and voice analysis
+        final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'anger']
+        
+        # Create comprehensive label
+        if final_distress:
+            if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'anger']:
+                label = f"Distress detected in both content and voice tone ({voice_emotion['emotion']})"
+            elif text_distress == "Distress":
+                label = f"Distress detected in content, voice tone: {voice_emotion['emotion']}"
+            else:
+                label = f"Distress detected in voice tone ({voice_emotion['emotion']}), content appears safe"
+        else:
+            label = f"Safe - Content: {text_distress}, Voice: {voice_emotion['emotion']}"
         
         # Clean up temp file
         try:
@@ -279,13 +435,17 @@ async def voice_check(file: UploadFile = File(...)):
         
         return {
             "transcript": transcript,
-            "distress": distress,
-            "label": label
+            "distress": final_distress,
+            "label": label,
+            "voice_emotion": voice_emotion,
+            "text_analysis": text_distress
         }
         
     except Exception as e:
         return {
             "transcript": "Error processing audio",
             "distress": False,
-            "label": f"Error: {str(e)}"
+            "label": f"Error: {str(e)}",
+            "voice_emotion": {"emotion": "unknown", "confidence": 0.0},
+            "text_analysis": "Error"
         } 
