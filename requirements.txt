@@ -7,3 +7,14 @@ python-multipart
 openai-whisper
 librosa
 numpy
+torch
+torchvision
+torchaudio
+transformers
+datasets
+accelerate
+bitsandbytes
+scikit-learn
+matplotlib
+seaborn
+soundfile

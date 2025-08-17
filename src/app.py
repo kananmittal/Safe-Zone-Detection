@@ -20,83 +20,28 @@ app.add_middleware(
 )
 
 def analyze_voice_emotion(audio_path):
-    """Analyze voice characteristics to detect emotional tone with fallback"""
+    """Analyze voice characteristics using TorchAudio processor with fallback"""
     try:
-        # Try to import librosa
-        import librosa
+        # Use the new TorchAudio processor
+        from src.audio_processor import TorchAudioProcessor
         
-        # Load audio file
-        y, sr = librosa.load(audio_path, sr=None)
+        processor = TorchAudioProcessor()
+        result = processor.process_audio(audio_path)
         
-        # Extract audio features
-        features = {}
-        
-        # 1. Pitch analysis (fundamental frequency)
-        try:
-            pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
-            pitch_values = pitches[magnitudes > 0.1]
-            if len(pitch_values) > 0:
-                features['pitch_mean'] = float(np.mean(pitch_values))
-                features['pitch_std'] = float(np.std(pitch_values))
-                features['pitch_range'] = float(np.max(pitch_values) - np.min(pitch_values))
-            else:
-                features['pitch_mean'] = 0.0
-                features['pitch_std'] = 0.0
-                features['pitch_range'] = 0.0
-        except Exception as e:
-            features['pitch_mean'] = 0.0
-            features['pitch_std'] = 0.0
-            features['pitch_range'] = 0.0
-        
-        # 2. Volume/Energy analysis
-        try:
-            rms = librosa.feature.rms(y=y)[0]
-            features['volume_mean'] = float(np.mean(rms))
-            features['volume_std'] = float(np.std(rms))
-            features['volume_max'] = float(np.max(rms))
-        except Exception as e:
-            features['volume_mean'] = 0.0
-            features['volume_std'] = 0.0
-            features['volume_max'] = 0.0
-        
-        # 3. Speech rate (tempo)
-        try:
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            features['speech_rate'] = float(tempo)
-        except Exception as e:
-            features['speech_rate'] = 100.0  # Default moderate speech rate
-        
-        # 4. Spectral features
-        try:
-            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-            features['spectral_mean'] = float(np.mean(spectral_centroids))
-            features['spectral_std'] = float(np.std(spectral_centroids))
-        except Exception as e:
-            features['spectral_mean'] = 0.0
-            features['spectral_std'] = 0.0
-        
-        # 5. Zero crossing rate
-        try:
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
-            features['zcr_mean'] = float(np.mean(zcr))
-        except Exception as e:
-            features['zcr_mean'] = 0.0
-        
-        # Analyze emotions based on features
-        emotion = analyze_emotion_from_features(features)
-        
+        # Return only essential information for API
         return {
-            'emotion': emotion,
-            'confidence': calculate_confidence(features),
-            'features': features
+            'emotion': result['emotion'],
+            'confidence': float(result['confidence']),
+            'emotion_scores': result.get('emotion_scores', {}),
+            'device_used': result.get('device_used', 'unknown')
         }
         
     except ImportError:
-        # Fallback if librosa is not available
+        # Fallback if TorchAudio is not available
         return {
             'emotion': 'neutral',
             'confidence': 0.0,
-            'error': 'librosa not available for voice analysis'
+            'error': 'TorchAudio not available for voice analysis'
         }
     except Exception as e:
         # Fallback for any other error
@@ -278,14 +223,7 @@ async def home():
                 color: #667eea;
                 font-style: italic;
             }
-            .debug-info {
-                background: #f0f0f0;
-                padding: 10px;
-                margin: 10px 0;
-                border-radius: 5px;
-                font-size: 12px;
-                color: #666;
-            }
+
             .emotion-badge {
                 display: inline-block;
                 padding: 5px 15px;
@@ -318,15 +256,11 @@ async def home():
             </div>
             
             <div id="result" class="result" style="display: none;"></div>
-            <div id="debug" class="debug-info" style="display: none;"></div>
             
             <script>
-                // Debug function
+                // Debug function (console only)
                 function log(message) {
                     console.log(message);
-                    const debugDiv = document.getElementById('debug');
-                    debugDiv.style.display = 'block';
-                    debugDiv.innerHTML += '<div>' + message + '</div>';
                 }
                 
                 // Handle file selection
@@ -405,7 +339,18 @@ async def home():
                             <p><strong>Transcript:</strong> ${data.transcript || 'No transcript available'}</p>
                             <p><strong>Content Analysis:</strong> ${isDistress ? '🚨 DISTRESS DETECTED' : '✅ SAFE'}</p>
                             <p><strong>Voice Emotion:</strong> ${emotionBadge} (Confidence: ${data.voice_emotion ? Math.round(data.voice_emotion.confidence * 100) : 0}%)</p>
+                            <p><strong>Processing Device:</strong> ${data.voice_emotion && data.voice_emotion.device_used ? data.voice_emotion.device_used.toUpperCase() : 'Unknown'}</p>
                             <p><strong>Overall Assessment:</strong> ${data.label || 'No analysis available'}</p>
+                            ${data.voice_emotion && data.voice_emotion.emotion_scores ? `
+                            <details>
+                                <summary>🎭 Detailed Emotion Scores</summary>
+                                <div style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 5px;">
+                                    ${Object.entries(data.voice_emotion.emotion_scores).map(([emotion, score]) => 
+                                        `<div><strong>${emotion}:</strong> ${Math.round(score * 100)}%</div>`
+                                    ).join('')}
+                                </div>
+                            </details>
+                            ` : ''}
                         `;
                     })
                     .catch(error => {
@@ -446,11 +391,11 @@ async def voice_check(file: UploadFile = File(...)):
             text_distress = detect_distress_simple(transcript)
             
             # Combine text and voice analysis
-            final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'anger']
+            final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'angry', 'disgust']
             
             # Create comprehensive label
             if final_distress:
-                if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'anger']:
+                if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'angry', 'disgust']:
                     label = f"Distress detected in both content and voice tone ({voice_emotion['emotion']})"
                 elif text_distress == "Distress":
                     label = f"Distress detected in content, voice tone: {voice_emotion['emotion']}"
