@@ -18,3 +18,5 @@ scikit-learn
 matplotlib
 seaborn
 soundfile
+sentencepiece
+protobuf

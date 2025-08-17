@@ -340,6 +340,8 @@ async def home():
                             <p><strong>Content Analysis:</strong> ${isDistress ? '🚨 DISTRESS DETECTED' : '✅ SAFE'}</p>
                             <p><strong>Voice Emotion:</strong> ${emotionBadge} (Confidence: ${data.voice_emotion ? Math.round(data.voice_emotion.confidence * 100) : 0}%)</p>
                             <p><strong>Processing Device:</strong> ${data.voice_emotion && data.voice_emotion.device_used ? data.voice_emotion.device_used.toUpperCase() : 'Unknown'}</p>
+                            <p><strong>Multi-Modal Analysis:</strong> ${data.multi_modal && data.multi_modal.llama_used ? '🤖 Llama 3' : '📋 Rule-based'} (Confidence: ${data.multi_modal ? Math.round(data.multi_modal.confidence * 100) : 0}%)</p>
+                            <p><strong>Safety Action:</strong> <span style="color: ${data.multi_modal && data.multi_modal.safety_action === 'EMERGENCY' ? '#ff0000' : data.multi_modal && data.multi_modal.safety_action === 'ALERT' ? '#ff6600' : data.multi_modal && data.multi_modal.safety_action === 'MONITOR' ? '#ffaa00' : '#00aa00'}; font-weight: bold;">${data.multi_modal ? data.multi_modal.safety_action : 'NONE'}</span></p>
                             <p><strong>Overall Assessment:</strong> ${data.label || 'No analysis available'}</p>
                             ${data.voice_emotion && data.voice_emotion.emotion_scores ? `
                             <details>
@@ -390,19 +392,52 @@ async def voice_check(file: UploadFile = File(...)):
             # Detect distress from text content
             text_distress = detect_distress_simple(transcript)
             
-            # Combine text and voice analysis
-            final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'angry', 'disgust']
-            
-            # Create comprehensive label
-            if final_distress:
-                if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'angry', 'disgust']:
-                    label = f"Distress detected in both content and voice tone ({voice_emotion['emotion']})"
-                elif text_distress == "Distress":
-                    label = f"Distress detected in content, voice tone: {voice_emotion['emotion']}"
+            # Multi-modal analysis using Llama 3
+            try:
+                from src.llama_processor import analyze_multi_modal_distress
+                
+                # Get voice features for multi-modal analysis
+                voice_features = {}
+                if 'features' in voice_emotion:
+                    features = voice_emotion['features']
+                    voice_features = {
+                        'pitch_mean': features.get('pitch_mean', 0.0),
+                        'rms_mean': features.get('rms_mean', 0.0),
+                        'tempo': features.get('tempo', 120.0),
+                        'zcr_mean': features.get('zcr_mean', 0.0)
+                    }
+                
+                # Perform multi-modal analysis
+                multi_modal_result = analyze_multi_modal_distress(
+                    transcript, 
+                    voice_features, 
+                    voice_emotion.get('emotion_scores', {})
+                )
+                
+                # Use multi-modal results
+                final_distress = multi_modal_result['distress_level'] in ['MEDIUM', 'HIGH', 'CRITICAL']
+                label = f"{multi_modal_result['distress_level']} - {multi_modal_result['reasoning']}"
+                confidence = multi_modal_result['confidence']
+                safety_action = multi_modal_result['safety_action']
+                llama_used = multi_modal_result['llama_analysis']
+                
+            except ImportError:
+                # Fallback to original logic
+                final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'angry', 'disgust']
+                
+                if final_distress:
+                    if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'angry', 'disgust']:
+                        label = f"Distress detected in both content and voice tone ({voice_emotion['emotion']})"
+                    elif text_distress == "Distress":
+                        label = f"Distress detected in content, voice tone: {voice_emotion['emotion']}"
+                    else:
+                        label = f"Distress detected in voice tone ({voice_emotion['emotion']}), content appears safe"
                 else:
-                    label = f"Distress detected in voice tone ({voice_emotion['emotion']}), content appears safe"
-            else:
-                label = f"Safe - Content: {text_distress}, Voice: {voice_emotion['emotion']}"
+                    label = f"Safe - Content: {text_distress}, Voice: {voice_emotion['emotion']}"
+                
+                confidence = voice_emotion.get('confidence', 0.5)
+                safety_action = "NONE"
+                llama_used = False
             
         except Exception as e:
             # Fallback if analysis fails
@@ -423,7 +458,12 @@ async def voice_check(file: UploadFile = File(...)):
             "distress": final_distress,
             "label": label,
             "voice_emotion": voice_emotion,
-            "text_analysis": text_distress
+            "text_analysis": text_distress,
+            "multi_modal": {
+                "confidence": confidence,
+                "safety_action": safety_action,
+                "llama_used": llama_used
+            }
         }
         
     except Exception as e:
