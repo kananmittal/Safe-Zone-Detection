@@ -70,4 +70,11 @@ models/
 # API keys and secrets
 .env.local
 .env.production
-secrets.json 
+secrets.json
+
+# Large datasets (use .gitkeep to preserve folder structure)
+datasets/crema/
+datasets/ravdess/
+datasets/tess/
+datasets/iemocap/
+datasets/synthetic/
