@@ -11,7 +11,6 @@ import logging
 from transformers import (
     AutoTokenizer, 
     AutoModelForCausalLM,
-    BitsAndBytesConfig,
     TrainingArguments,
     Trainer
 )
@@ -22,12 +21,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class Llama3Processor:
-    def __init__(self, model_name: str = "microsoft/DialoGPT-medium", device: str = "auto"):
+    def __init__(self, model_name: Optional[str] = None, device: str = "auto"):
         """
         Initialize Llama 3 processor for multi-modal analysis
         
         Args:
-            model_name: Hugging Face model name
+            model_name: Hugging Face model name or local checkpoint path. If None, will auto-resolve.
             device: Device to use (auto, mps, cuda, cpu)
         """
         self.model_name = model_name
@@ -47,14 +46,58 @@ class Llama3Processor:
         self.tokenizer = None
         self.model = None
         self._load_model()
+
+    def _resolve_model_path(self) -> str:
+        """
+        Resolve which model path/name to load:
+        1) LLAMA_MODEL_PATH env var if set and exists
+        2) Latest checkpoint under models/fine_tuned_llama_*/checkpoint-*
+        3) Fallback to public model 'microsoft/DialoGPT-medium'
+        """
+        # 1) Env override
+        env_path = os.getenv("LLAMA_MODEL_PATH")
+        if env_path and os.path.exists(env_path):
+            logger.info(f"Using model from LLAMA_MODEL_PATH: {env_path}")
+            return env_path
+
+        # 2) Latest local checkpoint
+        try:
+            models_dir = os.path.join(os.getcwd(), "models")
+            if os.path.isdir(models_dir):
+                # Find fine-tuned dirs
+                candidates = []
+                for root, dirs, _ in os.walk(models_dir):
+                    for d in dirs:
+                        if d.startswith("checkpoint-"):
+                            try:
+                                step = int(d.split("-", 1)[1])
+                            except Exception:
+                                step = -1
+                            candidates.append((step, os.path.join(root, d)))
+                if candidates:
+                    candidates.sort(key=lambda x: x[0])
+                    latest_path = candidates[-1][1]
+                    logger.info(f"Using latest local checkpoint: {latest_path}")
+                    return latest_path
+        except Exception as e:
+            logger.warning(f"Could not auto-detect local checkpoint: {e}")
+
+        # 3) Fallback public model
+        fallback = "microsoft/DialoGPT-medium"
+        logger.info(f"Falling back to public model: {fallback}")
+        return fallback
         
     def _load_model(self):
         """Load Llama 3 model with memory optimization"""
         try:
+            # Resolve model path/name if not provided
+            if not self.model_name:
+                self.model_name = self._resolve_model_path()
+
             logger.info(f"Loading Llama 3 model: {self.model_name}")
             
             # Use simple loading without quantization for compatibility
-            bnb_config = None
+            # Quantization disabled for compatibility
             
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
