@@ -111,7 +111,7 @@
   ```
 
 ### Day 11-14: Training & Integration
-- [ ] **Start fine-tuning process**
+- [x] **Start fine-tuning process**
   ```python
   training_args = {
       "per_device_train_batch_size": 2,
@@ -126,7 +126,7 @@
       "dataloader_pin_memory": False,
   }
   ```
-- [ ] **Monitor training progress**
+- [x] **Monitor training progress**
   - [ ] Loss tracking and visualization
   - [ ] Memory usage monitoring
   - [ ] Performance metrics logging
@@ -141,7 +141,7 @@
 ## 🗓️ Week 3: Optimization & Performance Tuning
 
 ### Day 15-17: Model Refinement
-- [ ] **Analyze training results**
+- [ ] **Analyze training results** (pending final model save)
   - [ ] Loss curves and convergence
   - [ ] Validation accuracy metrics
   - [ ] Error analysis and patterns
@@ -150,7 +150,7 @@
   - [ ] Batch size adjustment
   - [ ] LoRA rank tuning
 - [ ] **Retrain model if necessary**
-- [ ] **Optimize inference pipeline**
+- [ ] **Optimize inference pipeline** (wire model caching, quantized path)
 
 ### Day 18-21: Performance Tuning
 - [ ] **Memory optimization**
@@ -177,10 +177,10 @@
 ## 🗓️ Week 4: Deployment & Integration
 
 ### Day 22-24: System Integration
-- [ ] **Integrate with existing FastAPI system**
-  - [ ] Update `src/app.py` with new pipeline
-  - [ ] Modify `/voice-check` endpoint
-  - [ ] Add new audio processing routes
+- [x] **Integrate with existing FastAPI system**
+  - [x] Update `src/app.py` with new pipeline
+  - [x] Modify `/voice-check` endpoint
+  - [x] Add new audio processing routes
 - [ ] **API optimization**
   - [ ] Response time optimization
   - [ ] Error handling improvements
@@ -196,7 +196,21 @@
   - [ ] End-to-end system testing
   - [ ] Accuracy validation
   - [ ] Performance stress testing
-- [ ] **Documentation updates**
+- [x] **Documentation updates** (README updated Aug 18)
+
+---
+
+## ✅ Current Fine-Tuning Status (Aug 18)
+- Checkpoints saved: `checkpoint-500`, `checkpoint-1000`, `checkpoint-1500`, `checkpoint-6000`, `checkpoint-6500`, `checkpoint-8000`
+- Latest persisted: `checkpoint-8000` (epoch ~1.80)
+- Training job running (fast config) and near completion
+- Loss trending ~0.045 (stable)
+
+## 🔜 Next Actions
+- Wait for final save directory (`fast_final_model_*`) to appear
+- Set `LLAMA_MODEL_PATH` to the final model dir for deterministic loading
+- Add evaluation script (validation split, accuracy/F1, confusion matrix)
+- Optional: Generate synthetic data and re-train for balance/coverage
   - [ ] Update README.md
   - [ ] Create API documentation
   - [ ] Add deployment guide

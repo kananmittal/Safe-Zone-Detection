@@ -1,12 +1,13 @@
 # Voice Distress Detection System
 
-A real-time voice distress detection system that uses Whisper for speech-to-text conversion and AI for distress detection.
+A real-time voice distress detection system that uses Whisper for speech-to-text, TorchAudio for rich voice features, and a fine-tuned LLM for multi-modal distress detection.
 
 ## 🚀 Features
 
 - 🎤 **Voice Upload**: Upload audio files through a beautiful web interface
 - 🗣️ **Speech-to-Text**: Convert speech to text using OpenAI Whisper
-- 🧠 **AI Analysis**: Detect distress using keyword-based analysis
+- 🔊 **TorchAudio Features**: MFCCs, Mel-spectrograms, pitch, RMS, ZCR, spectral features
+- 🧠 **Multi-Modal AI Analysis**: LLM combines transcript + voice features for distress level and safety action
 - 🌐 **Web Interface**: Modern, responsive web UI with drag-and-drop functionality
 - 📱 **Mobile Friendly**: Works on all devices
 - 🔧 **Easy Setup**: Simple installation and configuration
@@ -17,13 +18,24 @@ A real-time voice distress detection system that uses Whisper for speech-to-text
 llm_distress_project_v2/
 ├── src/
 │   ├── __init__.py
-│   └── app.py              # Main FastAPI application
+│   └── app.py              # Main FastAPI application (uses TorchAudio + LLM)
+│   ├── audio_processor.py  # TorchAudio feature extraction + rule-based emotion
+│   ├── llama_processor.py  # LLM multi-modal analysis (auto-loads latest fine-tuned checkpoint)
+│   ├── fine_tuner.py       # Baseline fine-tuning script
+│   ├── resume_fine_tuning.py # Resume training from checkpoint
+│   └── fast_fine_tuner.py  # Faster fine-tuning configuration
 ├── tests/
 │   ├── __init__.py
 │   └── test_app.py         # Test suite
 ├── docs/                   # Documentation
 ├── main.py                 # Application entry point
 ├── requirements.txt        # Python dependencies
+├── datasets/               # Raw and processed datasets
+│   └── processed/
+│       ├── combined_dataset.csv
+│       └── fine_tuning_data.json
+├── download_datasets.py    # TESS/IEMOCAP instructions + status
+├── src/data_processor.py   # Dataset processing to create fine_tuning_data.json
 ├── .gitignore             # Git ignore rules
 └── README.md              # This file
 ```
