@@ -149,7 +149,7 @@ async def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Audio → Emotion Recognition</title>
+        <title>Voice Distress Detection</title>
         <style>
             body { 
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -195,7 +195,14 @@ async def home():
                 border-radius: 10px;
                 border-left: 4px solid #667eea;
             }
-            /* Distress styles removed in emotion-only mode */
+            .distress { 
+                background: #ffebee; 
+                border-left: 4px solid #f44336; 
+            }
+            .safe { 
+                background: #e8f5e8; 
+                border-left: 4px solid #4caf50; 
+            }
             .upload-btn {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
@@ -234,8 +241,8 @@ async def home():
     <body>
         <div class="container">
             <div class="header">
-                <h1>🎤 Audio → Emotion Recognition</h1>
-                <p>Upload an audio file to recognize the primary emotion</p>
+                <h1>🎤 Voice Distress Detection</h1>
+                <p>Upload an audio file to detect distress in speech and emotional tone</p>
             </div>
             
             <div class="upload-area">
@@ -320,7 +327,8 @@ async def home():
                     })
                     .then(data => {
                         log('Data received: ' + JSON.stringify(data));
-                        resultDiv.className = 'result';
+                        const isDistress = data.distress;
+                        resultDiv.className = 'result ' + (isDistress ? 'distress' : 'safe');
                         
                         // Create emotion badge
                         const emotionBadge = data.voice_emotion ? 
@@ -329,9 +337,12 @@ async def home():
                         resultDiv.innerHTML = `
                             <h3>📊 Analysis Results</h3>
                             <p><strong>Transcript:</strong> ${data.transcript || 'No transcript available'}</p>
-                            <p><strong>Detected Emotion:</strong> ${emotionBadge} (Confidence: ${data.voice_emotion ? Math.round(data.voice_emotion.confidence * 100) : 0}%)</p>
+                            <p><strong>Content Analysis:</strong> ${isDistress ? '🚨 DISTRESS DETECTED' : '✅ SAFE'}</p>
+                            <p><strong>Voice Emotion:</strong> ${emotionBadge} (Confidence: ${data.voice_emotion ? Math.round(data.voice_emotion.confidence * 100) : 0}%)</p>
                             <p><strong>Processing Device:</strong> ${data.voice_emotion && data.voice_emotion.device_used ? data.voice_emotion.device_used.toUpperCase() : 'Unknown'}</p>
-                            
+                            <p><strong>Multi-Modal Analysis:</strong> ${data.multi_modal && data.multi_modal.llama_used ? '🤖 Llama 3' : '📋 Rule-based'} (Confidence: ${data.multi_modal ? Math.round(data.multi_modal.confidence * 100) : 0}%)</p>
+                            <p><strong>Safety Action:</strong> <span style="color: ${data.multi_modal && data.multi_modal.safety_action === 'EMERGENCY' ? '#ff0000' : data.multi_modal && data.multi_modal.safety_action === 'ALERT' ? '#ff6600' : data.multi_modal && data.multi_modal.safety_action === 'MONITOR' ? '#ffaa00' : '#00aa00'}; font-weight: bold;">${data.multi_modal ? data.multi_modal.safety_action : 'NONE'}</span></p>
+                            <p><strong>Overall Assessment:</strong> ${data.label || 'No analysis available'}</p>
                             ${data.voice_emotion && data.voice_emotion.emotion_scores ? `
                             <details>
                                 <summary>🎭 Detailed Emotion Scores</summary>
@@ -372,15 +383,69 @@ async def voice_check(file: UploadFile = File(...)):
             temp_path = temp_file.name
         
         try:
-            # Convert speech to text (optional for display)
+            # Convert speech to text
             transcript = simple_speech_to_text(temp_path)
-            # Analyze voice emotion only
+            
+            # Analyze voice emotion
             voice_emotion = analyze_voice_emotion(temp_path)
+            
+            # Detect distress from text content
+            text_distress = detect_distress_simple(transcript)
+            
+            # Multi-modal analysis using Llama 3
+            try:
+                from src.llama_processor import analyze_multi_modal_distress
+                
+                # Get voice features for multi-modal analysis
+                voice_features = {}
+                if 'features' in voice_emotion:
+                    features = voice_emotion['features']
+                    voice_features = {
+                        'pitch_mean': features.get('pitch_mean', 0.0),
+                        'rms_mean': features.get('rms_mean', 0.0),
+                        'tempo': features.get('tempo', 120.0),
+                        'zcr_mean': features.get('zcr_mean', 0.0)
+                    }
+                
+                # Perform multi-modal analysis
+                multi_modal_result = analyze_multi_modal_distress(
+                    transcript, 
+                    voice_features, 
+                    voice_emotion.get('emotion_scores', {})
+                )
+                
+                # Use multi-modal results
+                final_distress = multi_modal_result['distress_level'] in ['MEDIUM', 'HIGH', 'CRITICAL']
+                label = f"{multi_modal_result['distress_level']} - {multi_modal_result['reasoning']}"
+                confidence = multi_modal_result['confidence']
+                safety_action = multi_modal_result['safety_action']
+                llama_used = multi_modal_result['llama_analysis']
+                
+            except ImportError:
+                # Fallback to original logic
+                final_distress = text_distress == "Distress" or voice_emotion['emotion'] in ['fear', 'angry', 'disgust']
+                
+                if final_distress:
+                    if text_distress == "Distress" and voice_emotion['emotion'] in ['fear', 'angry', 'disgust']:
+                        label = f"Distress detected in both content and voice tone ({voice_emotion['emotion']})"
+                    elif text_distress == "Distress":
+                        label = f"Distress detected in content, voice tone: {voice_emotion['emotion']}"
+                    else:
+                        label = f"Distress detected in voice tone ({voice_emotion['emotion']}), content appears safe"
+                else:
+                    label = f"Safe - Content: {text_distress}, Voice: {voice_emotion['emotion']}"
+                
+                confidence = voice_emotion.get('confidence', 0.5)
+                safety_action = "NONE"
+                llama_used = False
             
         except Exception as e:
             # Fallback if analysis fails
             transcript = "Error in analysis"
             voice_emotion = {"emotion": "neutral", "confidence": 0.0, "error": str(e)}
+            text_distress = "Safe"
+            final_distress = False
+            label = f"Analysis error: {str(e)}"
         
         # Clean up temp file
         try:
@@ -390,12 +455,23 @@ async def voice_check(file: UploadFile = File(...)):
         
         return {
             "transcript": transcript,
-            "voice_emotion": voice_emotion
+            "distress": final_distress,
+            "label": label,
+            "voice_emotion": voice_emotion,
+            "text_analysis": text_distress,
+            "multi_modal": {
+                "confidence": confidence,
+                "safety_action": safety_action,
+                "llama_used": llama_used
+            }
         }
         
     except Exception as e:
         # Comprehensive error handling
         return {
             "transcript": "Error processing audio",
-            "voice_emotion": {"emotion": "unknown", "confidence": 0.0, "error": str(e)}
+            "distress": False,
+            "label": f"Error: {str(e)}",
+            "voice_emotion": {"emotion": "unknown", "confidence": 0.0, "error": str(e)},
+            "text_analysis": "Error"
         }

@@ -1,3 +1,29 @@
+# Data & large artifacts
+datasets/
+ignore/
+logs/
+
+# Models & binaries
+models/**/*.pkl
+models/**/*.pt
+models/**/*.onnx
+models/**/*.bin
+models/**/incremental_training_summary.json
+advanced_evaluation_ravdess.json
+
+# Archives (optional keep tracked if desired)
+archive/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Env
+.env
+.venv/
+venv/
+
 # Python
 __pycache__/
 *.py[cod]
