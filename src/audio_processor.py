@@ -158,65 +158,7 @@ class TorchAudioProcessor:
                     'device_used': self.device
                 }
             
-            features = {}
-            
-            # 1. Mel spectrogram
-            mel_spec = self.mel_transform(waveform)
-            features['mel_spectrogram'] = mel_spec.cpu().numpy()
-            features['mel_mean'] = float(torch.mean(mel_spec).cpu().numpy())
-            features['mel_std'] = float(torch.std(mel_spec).cpu().numpy())
-            
-            # 2. MFCC coefficients
-            mfcc = self.mfcc_transform(waveform)
-            features['mfcc'] = mfcc.cpu().numpy()
-            features['mfcc_mean'] = float(torch.mean(mfcc).cpu().numpy())
-            features['mfcc_std'] = float(torch.std(mfcc).cpu().numpy())
-            
-            # 3. Spectral centroid
-            spectral_cent = self.spectral_centroid(waveform)
-            features['spectral_centroid'] = spectral_cent.cpu().numpy()
-            features['spectral_centroid_mean'] = float(torch.mean(spectral_cent).cpu().numpy())
-            features['spectral_centroid_std'] = float(torch.std(spectral_cent).cpu().numpy())
-            
-            # 4. Zero crossing rate (manual implementation)
-            zcr = self._calculate_zero_crossing_rate(waveform)
-            features['zero_crossing_rate'] = zcr
-            features['zcr_mean'] = float(np.mean(zcr))
-            features['zcr_std'] = float(np.std(zcr))
-            
-            # 5. RMS energy (manual implementation)
-            rms = self._calculate_rms_energy(waveform)
-            features['rms_energy'] = rms
-            features['rms_mean'] = float(np.mean(rms))
-            features['rms_std'] = float(np.std(rms))
-            features['rms_max'] = float(np.max(rms))
-            
-            # 6. Pitch analysis (using autocorrelation)
-            pitch = self._extract_pitch(waveform)
-            features['pitch'] = pitch
-            features['pitch_mean'] = float(np.mean(pitch)) if len(pitch) > 0 else 0.0
-            features['pitch_std'] = float(np.std(pitch)) if len(pitch) > 0 else 0.0
-            features['pitch_range'] = float(np.max(pitch) - np.min(pitch)) if len(pitch) > 0 else 0.0
-            
-            # 7. Spectral bandwidth
-            spectral_bw = self._extract_spectral_bandwidth(waveform)
-            features['spectral_bandwidth'] = spectral_bw
-            features['spectral_bw_mean'] = float(np.mean(spectral_bw))
-            features['spectral_bw_std'] = float(np.std(spectral_bw))
-            
-            # 8. Spectral rolloff
-            spectral_rolloff = self._extract_spectral_rolloff(waveform)
-            features['spectral_rolloff'] = spectral_rolloff
-            features['spectral_rolloff_mean'] = float(np.mean(spectral_rolloff))
-            features['spectral_rolloff_std'] = float(np.std(spectral_rolloff))
-            
-            # 9. Tempo estimation
-            tempo = self._estimate_tempo(waveform)
-            features['tempo'] = tempo
-            
-            # 10. Audio duration
-            features['duration'] = float(waveform.shape[1] / self.sample_rate)
-            
+            features = self.extract_features_from_waveform(waveform)
             logger.info(f"Extracted {len(features)} feature categories from {audio_path}")
             return features
             
@@ -426,6 +368,83 @@ class TorchAudioProcessor:
         except Exception as e:
             logger.warning(f"Tempo estimation failed: {e}")
             return 120.0  # Default tempo
+    
+    def extract_features_from_waveform(self, waveform: torch.Tensor) -> Dict[str, np.ndarray]:
+        """Extract features directly from a preloaded waveform (on correct device)."""
+        features: Dict[str, np.ndarray] = {}
+        mel_spec = self.mel_transform(waveform)
+        features['mel_spectrogram'] = mel_spec.cpu().numpy()
+        features['mel_mean'] = float(torch.mean(mel_spec).cpu().numpy())
+        features['mel_std'] = float(torch.std(mel_spec).cpu().numpy())
+        mfcc = self.mfcc_transform(waveform)
+        features['mfcc'] = mfcc.cpu().numpy()
+        features['mfcc_mean'] = float(torch.mean(mfcc).cpu().numpy())
+        features['mfcc_std'] = float(torch.std(mfcc).cpu().numpy())
+        try:
+            mfcc_delta = F.compute_deltas(mfcc)
+            mfcc_delta2 = F.compute_deltas(mfcc_delta)
+            features['mfcc_delta_mean'] = float(torch.mean(mfcc_delta).cpu().numpy())
+            features['mfcc_delta_std'] = float(torch.std(mfcc_delta).cpu().numpy())
+            features['mfcc_delta2_mean'] = float(torch.mean(mfcc_delta2).cpu().numpy())
+            features['mfcc_delta2_std'] = float(torch.std(mfcc_delta2).cpu().numpy())
+        except Exception as e:
+            logger.warning(f"MFCC deltas computation failed (waveform): {e}")
+        spectral_cent = self.spectral_centroid(waveform)
+        features['spectral_centroid'] = spectral_cent.cpu().numpy()
+        features['spectral_centroid_mean'] = float(torch.mean(spectral_cent).cpu().numpy())
+        features['spectral_centroid_std'] = float(torch.std(spectral_cent).cpu().numpy())
+        zcr = self._calculate_zero_crossing_rate(waveform)
+        features['zero_crossing_rate'] = zcr
+        features['zcr_mean'] = float(np.mean(zcr))
+        features['zcr_std'] = float(np.std(zcr))
+        rms = self._calculate_rms_energy(waveform)
+        features['rms_energy'] = rms
+        features['rms_mean'] = float(np.mean(rms))
+        features['rms_std'] = float(np.std(rms))
+        features['rms_max'] = float(np.max(rms))
+        pitch = self._extract_pitch(waveform)
+        features['pitch'] = pitch
+        features['pitch_mean'] = float(np.mean(pitch)) if len(pitch) > 0 else 0.0
+        features['pitch_std'] = float(np.std(pitch)) if len(pitch) > 0 else 0.0
+        features['pitch_range'] = float(np.max(pitch) - np.min(pitch)) if len(pitch) > 0 else 0.0
+        spectral_bw = self._extract_spectral_bandwidth(waveform)
+        features['spectral_bandwidth'] = spectral_bw
+        features['spectral_bw_mean'] = float(np.mean(spectral_bw))
+        features['spectral_bw_std'] = float(np.std(spectral_bw))
+        spectral_rolloff = self._extract_spectral_rolloff(waveform)
+        features['spectral_rolloff'] = spectral_rolloff
+        features['spectral_rolloff_mean'] = float(np.mean(spectral_rolloff))
+        features['spectral_rolloff_std'] = float(np.std(spectral_rolloff))
+        tempo = self._estimate_tempo(waveform)
+        features['tempo'] = tempo
+        features['duration'] = float(waveform.shape[1] / self.sample_rate)
+        return features
+
+    def augment_waveforms(self, waveform: torch.Tensor) -> List[torch.Tensor]:
+        """Generate simple augmented versions of the waveform on-device."""
+        augments: List[torch.Tensor] = []
+        try:
+            noise_level = 0.01
+            noise = torch.randn_like(waveform) * noise_level
+            augments.append(torch.clamp(waveform + noise, -1.0, 1.0))
+        except Exception as e:
+            logger.warning(f"Noise augmentation failed: {e}")
+        try:
+            if hasattr(F, 'pitch_shift'):
+                augments.append(torch.clamp(F.pitch_shift(waveform, self.sample_rate, n_steps=+2), -1.0, 1.0))
+                augments.append(torch.clamp(F.pitch_shift(waveform, self.sample_rate, n_steps=-2), -1.0, 1.0))
+        except Exception as e:
+            logger.warning(f"Pitch shift augmentation failed: {e}")
+        try:
+            for factor in [1.1, 0.9]:
+                new_sr = int(self.sample_rate * factor)
+                resample1 = T.Resample(self.sample_rate, new_sr).to(self.device)
+                resample2 = T.Resample(new_sr, self.sample_rate).to(self.device)
+                sped = resample2(resample1(waveform))
+                augments.append(torch.clamp(sped, -1.0, 1.0))
+        except Exception as e:
+            logger.warning(f"Speed perturbation failed: {e}")
+        return augments
     
     def analyze_emotion_from_features(self, features: Dict[str, np.ndarray]) -> Dict[str, float]:
         """

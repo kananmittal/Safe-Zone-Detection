@@ -83,8 +83,13 @@ class Llama3Processor:
             logger.warning(f"Could not auto-detect local checkpoint: {e}")
 
         # 3) Fallback public model
-        fallback = "microsoft/DialoGPT-medium"
-        logger.info(f"Falling back to public model: {fallback}")
+        try:
+            import mlx.core as mx
+            fallback = "mlx-community/Meta-Llama-3-8B-Instruct-4bit"
+            logger.info(f"Using MLX-LM optimized fallback: {fallback}")
+        except ImportError:
+            fallback = "microsoft/DialoGPT-medium"
+            logger.info(f"Falling back to public model: {fallback}")
         return fallback
         
     def _load_model(self):
@@ -99,6 +104,24 @@ class Llama3Processor:
             # Use simple loading without quantization for compatibility
             # Quantization disabled for compatibility
             
+            self.use_mlx = False
+            try:
+                import mlx.core as mx
+                from mlx_lm import load
+                
+                # Check for trained LoRA adapters
+                adapter_path = "adapters" if os.path.exists("adapters") else None
+                if adapter_path:
+                    logger.info(f"Found trained LoRA weights at '{adapter_path}'. Loading adapters alongside base model.")
+                    
+                # On Macs, prefer MLX
+                self.mlx_model, self.tokenizer = load(self.model_name, adapter_path=adapter_path)
+                self.use_mlx = True
+                logger.info("✅ MLX-LM loaded successfully")
+                return
+            except Exception as e:
+                logger.info(f"MLX-LM load skipped/failed: {e}. Falling back to Transformers.")
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
@@ -117,13 +140,41 @@ class Llama3Processor:
                 torch_dtype=torch.float32
             ).to(self.device)
             
-            logger.info("✅ Llama 3 model loaded successfully")
+            logger.info("✅ Llama 3 model loaded successfully via Transformers")
             
         except Exception as e:
             logger.error(f"Error loading Llama 3 model: {e}")
             logger.info("Falling back to rule-based analysis")
             self.model = None
             self.tokenizer = None
+            self.use_mlx = False
+    
+    def generate_text(self, prompt: str, max_new_tokens: int = 100, temperature: float = 0.1) -> str:
+        """Unified text generation using either MLX or Transformers"""
+        if getattr(self, 'use_mlx', False):
+            from mlx_lm import generate
+            response = generate(
+                self.mlx_model,
+                self.tokenizer,
+                prompt=prompt,
+                max_tokens=max_new_tokens,
+                verbose=False
+            )
+            return response
+        elif self.model is not None and self.tokenizer is not None:
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            return self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+        else:
+            return ""
     
     def _create_prompt(self, transcript: str, voice_features: Dict, emotion_scores: Dict) -> str:
         """
@@ -163,9 +214,10 @@ VOICE FEATURES: {', '.join(feature_summary)}
 
 EMOTION ANALYSIS: {', '.join(emotion_summary)}
 
-Based on the transcript, voice characteristics, and emotional indicators, determine if this person is in distress or danger.
+Based on the transcript, voice characteristics, and emotional indicators, analyze the distress level.
 
-Respond with:
+CRITICAL INSTRUCTION: You must respond ONLY with the exact following schema and nothing else. Do not add conversational filler.
+
 DISTRESS_LEVEL: (LOW/MEDIUM/HIGH/CRITICAL)
 CONFIDENCE: (0-100%)
 REASONING: Brief explanation
@@ -213,25 +265,42 @@ Analysis:"""
                     if action in ["NONE", "MONITOR", "ALERT", "EMERGENCY"]:
                         safety_action = action
             
-            # If parsing failed, try to extract from the full response
+            # If strict line parsing failed, try to extract via regex/keyword search
             if distress_level == "LOW" and "DISTRESS_LEVEL:" not in response:
-                # Analyze the response content for distress indicators
+                import re
                 response_lower = response.lower()
-                if any(word in response_lower for word in ["high", "critical", "emergency", "danger"]):
-                    distress_level = "HIGH"
-                    confidence = 75
-                    reasoning = "High distress indicators detected in analysis"
-                    safety_action = "ALERT"
-                elif any(word in response_lower for word in ["medium", "moderate", "concern"]):
-                    distress_level = "MEDIUM"
-                    confidence = 60
-                    reasoning = "Moderate distress indicators detected"
-                    safety_action = "MONITOR"
+                
+                # Check for "distress level is [level]" or "distress level: [level]"
+                match = re.search(r'distress\s*level\s*(is|:)?\s*(low|medium|high|critical)', response_lower)
+                
+                if match:
+                    detected_level = match.group(2).upper()
+                    distress_level = detected_level
+                    if detected_level in ["HIGH", "CRITICAL"]:
+                        confidence = 75
+                        safety_action = "ALERT"
+                    elif detected_level == "MEDIUM":
+                        confidence = 60
+                        safety_action = "MONITOR"
                 else:
-                    distress_level = "LOW"
-                    confidence = 80
-                    reasoning = "No significant distress indicators"
-                    safety_action = "NONE"
+                    # Generic fallback: Only trigger if words like extreme/emergency are present
+                    # since conversational models often use words like "high pitch" which might
+                    # trigger false positives in simple keyword checks.
+                    if any(word in response_lower for word in ["critical distress", "emergency", "extreme danger"]):
+                        distress_level = "HIGH"
+                        confidence = 75
+                        reasoning = "High distress phrase detected"
+                        safety_action = "ALERT"
+                    elif any(word in response_lower for word in ["moderate distress", "some concern"]):
+                        distress_level = "MEDIUM"
+                        confidence = 60
+                        reasoning = "Moderate distress phrase detected"
+                        safety_action = "MONITOR"
+                    else:
+                        distress_level = "LOW"
+                        confidence = 80
+                        reasoning = "No strict schema or high distress keywords found"
+                        safety_action = "NONE"
             
             return {
                 'distress_level': distress_level,

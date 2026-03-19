@@ -474,4 +474,4 @@ async def voice_check(file: UploadFile = File(...)):
             "label": f"Error: {str(e)}",
             "voice_emotion": {"emotion": "unknown", "confidence": 0.0, "error": str(e)},
             "text_analysis": "Error"
-        } 
+        }

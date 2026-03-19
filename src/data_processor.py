@@ -172,27 +172,42 @@ class DatasetProcessor:
         logger.info("Processing IEMOCAP dataset...")
         
         data = []
-        iemocap_dir = self.datasets_dir / "iemocap"
+        iemocap_dir = self.datasets_dir / "IEMOCAP_full_release 2"
         
         # Check if IEMOCAP is available
         if not iemocap_dir.exists():
-            logger.warning("IEMOCAP dataset not found. Please download manually from https://sail.usc.edu/iemocap/")
-            return pd.DataFrame()
+            # Try original name as fallback
+            iemocap_dir = self.datasets_dir / "iemocap"
+            if not iemocap_dir.exists():
+                logger.warning("IEMOCAP dataset not found.")
+                return pd.DataFrame()
         
-        # Look for evaluation files
-        for eval_file in iemocap_dir.rglob("*_eval.txt"):
+        # Look for evaluation files in EmoEvaluation directories
+        for eval_file in iemocap_dir.rglob("*.txt"):
+            if "EmoEvaluation" not in eval_file.parts:
+                continue
             try:
                 with open(eval_file, 'r') as f:
                     for line in f:
+                        if not line.startswith('['):
+                            continue
+                        
                         parts = line.strip().split('\t')
                         if len(parts) >= 3:
-                            filename = parts[0]
+                            filename = parts[1] # Actually the second element is the filename in the new format like `[06.2900 - 08.2300]	Ses01F_impro01_F000	neu	...`
                             emotion = parts[2].lower()
                             
-                            # Find corresponding audio file
-                            audio_file = iemocap_dir / f"{filename}.wav"
+                            if emotion not in self.emotion_mappings['iemocap']:
+                                continue
+                            
+                            # Find corresponding audio file. Can be inside Session*/sentences/wav/
+                            session = f"Session{filename[4]}"
+                            audio_file = iemocap_dir / session / "sentences" / "wav" / f"{'_'.join(filename.split('_')[:-1])}" / f"{filename}.wav"
+
+                            # The actual structure of the wavs usually is: Session1/sentences/wav/Ses01F_impro01/Ses01F_impro01_F000.wav
+                            
                             if audio_file.exists():
-                                emotion = self.emotion_mappings['iemocap'].get(emotion, emotion)
+                                emotion = self.emotion_mappings['iemocap'][emotion]
                                 is_distress = emotion in self.distress_emotions
                                 
                                 data.append({

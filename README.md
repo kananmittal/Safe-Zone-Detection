@@ -18,7 +18,7 @@ A real-time voice distress detection system that uses Whisper for speech-to-text
 llm_distress_project_v2/
 ├── src/
 │   ├── __init__.py
-│   └── app.py              # Main FastAPI application (uses TorchAudio + LLM)
+│   └── api.py              # FastAPI application for emotion inference (RAVDESS model)
 │   ├── audio_processor.py  # TorchAudio feature extraction + rule-based emotion
 │   ├── llama_processor.py  # LLM multi-modal analysis (auto-loads latest fine-tuned checkpoint)
 │   ├── fine_tuner.py       # Baseline fine-tuning script
@@ -71,37 +71,28 @@ llm_distress_project_v2/
 ### Start the Application
 
 ```bash
-# Method 1: Using main.py
-python main.py
-
-# Method 2: Using uvicorn directly
-uvicorn src.app:app --reload --host 127.0.0.1 --port 8000
+# Using uvicorn directly
+uvicorn src.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### Access the Web Interface
+### Health Check
 
-Open your browser and go to: `http://127.0.0.1:8000`
-
-### Upload Audio Files
-
-1. **Drag and drop** any audio file onto the upload area
-2. **Or click** "Choose Audio File" to browse and select a file
-3. **Wait for analysis** - the system will process the audio
-4. **View results** showing transcript and distress detection
+Open: `http://127.0.0.1:8000/healthz`
 
 ### API Usage
 
 ```bash
-# Upload audio file via curl
-curl -X POST -F 'file=@your_audio_file.mp3' http://127.0.0.1:8000/voice-check
+# Upload audio file for emotion prediction via curl
+curl -X POST -F 'file=@your_audio_file.wav' http://127.0.0.1:8000/predict-emotion
 ```
 
 **Response:**
 ```json
 {
-  "transcript": "I'm feeling really scared right now",
-  "distress": true,
-  "label": "Distress"
+  "emotion": "happy",
+  "emotion_scores": {"happy": 0.73, "neutral": 0.12, ...},
+  "features": {"mfcc_mean": [...], ...},
+  "device_used": "mps"
 }
 ```
 

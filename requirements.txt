@@ -20,3 +20,4 @@ seaborn
 soundfile
 sentencepiece
 protobuf
+mlx-lm
